@@ -1,2 +1,6 @@
 opencv-python
 numpy
+<<<<<<< HEAD
+=======
+matplotlib
+>>>>>>> 410d79265b3c7984e4962ab54fb5cd76d250327d
