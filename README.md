@@ -1,137 +1,239 @@
 # Lane Finding Project (ADAS)
 
-This project finds lane lines in road images and estimates how sharply the road curves and where the car sits in its lane. It is written in Python with OpenCV, and the whole thing lives in a single file, `pipeline.py`. Each step is a small function, and `process()` simply calls them one after another. Results are shown with `cv.imshow`, and all images are kept in `img/`.
+This is a lane detection project made in Pyhton using OpenCV. The program takes road images and tries to find the left and right lane lines. From the detected lanes it also calculates the approximate road curvature and the position of the car relative to the middle of the lane.
 
-Roughly, the pipeline does this:
+The main code is in `pipeline.py`. The pipeline is split into several functions, so each part can be tested separately.
 
-* Calibrate the camera from chessboard photos.
-* Undistort the road images.
-* Turn each image into a black-and-white mask of likely lane pixels, using color and edge information.
-* Warp the mask to a bird's-eye view.
-* Find the lanes with a Hough transform and fit a curve to each one.
-* Work out the curvature of the road and the car's offset from the lane center.
-* Draw the detected lane back onto the original image. *(TODO)*
-* Run everything on a video. *(TODO)*
+## What the program does
+
+The main steps are:
+
+- Calibrate the camera using chessboard images.
+- Remove lens distortion from the input image.
+- Create a binary image using color and gradient information.
+- Change the perspective to a bird's-eye view.
+- Find lane segments using the Hough transform.
+- Fit a polynomial to the detected lane points.
+- Calculate the radius of the curve and the car's position in the lane.
+- Draw the detected lanes back onto the original image. **(TODO)**
+- Process a video. **(TODO)**
 
 ## Project structure
 
-```
+```text
 adas-project/
-├── pipeline.py        # the whole pipeline
+├── pipeline.py        # main program
 ├── requirements.txt   # opencv-python, numpy
-├── img/               # 20 chessboard photos, road test images, calib.npz
-├── examples/          # pictures used in this README
+├── img/               # calibration and test images
+├── examples/          # images used in this README
 └── README.md
 ```
 
-## Running it
+## Running the program
+
+First install the required packages:
 
 ```bash
-pip install -r requirements.txt     # installs opencv-python and numpy
-python pipeline.py                  # runs every test image in img/
-python pipeline.py img/test1.jpg    # runs a single image
-python pipeline.py --recalibrate    # redoes the calibration (img/calib.npz)
+pip install -r requirements.txt
 ```
 
-If `img/calib.npz` does not exisst yet, the script calibrates the camera first, using the chessboard photos in `img/`. For every road image it then opens six widnows in a 3x2 grid: the original, the undistorted image with the source trapezoid, the binary mask, the bird's-eye view, the Hough segments, and the final polynomial fit with the radius and offset written on it. Press any key to move to the next image, or ESC to quit. The console also prints a small table with the radius, offset and lane width for each image.
+Then the program can be started in a few different ways:
 
-A few practical notes. Because the script uses `imshow`, it needs a machine with a display. File paths are resolved relative to `pipeline.py`, so you can start it from any folder. Images that aren't 1280x720 get resized, since the calibration and the perspective points were set up for that size.
+```bash
+python pipeline.py                  # runs all test images
+python pipeline.py img/test1.jpg    # runs one image
+python pipeline.py --recalibrate    # calculates the camera calibration again
+```
 
-| Function in `pipeline.py` | What it does |
+If `img/calib.npz` does not exist, the program automatically runs the calibration using the chessboard images from `img/`.
+
+For every image, six windows are opened:
+
+1. original image
+2. undistorted image with the source trapezoid
+3. binary image
+4. bird's-eye view
+5. detected Hough lines
+6. final polynomial fit
+
+The windows are arranged in a 3x2 grid. Press any key to move to the next image and press ESC to stop the program. The terminal also prints the calculated radius, offset and lane width.
+
+A few practical things to know:
+
+- The program uses `imshow`, so it needs a computer with a display.
+- Paths are based on the location of `pipeline.py`, so the program can also be started from another working directory.
+- Images that are not $1280 \times 720$ are resized because the calibration and perspective points were chosen for this resolution.
+
+## Main functions
+
+| Function | What it does |
 |---|---|
-| `calibrate()` | camera calibration from the 20 chessboard images |
-| `undistort()` | removes lens distortion |
-| `threshold()` | builds the binary mask (S channel + Sobel) |
-| `warp()` | perspective transform to the bird's-eye view |
-| `find_lane_points()` | finds Hough segments and splits them into left and right |
-| `fit_lanes()` | fits one polynomial shape to both lanes |
-| `measure()` | curvature radius and vehicle offset |
-| `process()` | runs all of the above on one image |
+| `calibrate()` | Calculates the camera calibration from the chessboard images |
+| `undistort()` | Removes lens distortion |
+| `threshold()` | Creates the binary image using the S channel and Sobel |
+| `warp()` | Changes the image to bird's-eye perspective |
+| `find_lane_points()` | Finds Hough line segments and separates them into left and right |
+| `fit_lanes()` | Fits the polynomial to the lane points |
+| `measure()` | Calculates the curve radius and vehicle offset |
+| `process()` | Runs all steps for one image |
 
-## Camera Calibration
+# Camera Calibration
 
-#### 1. How the camera matrix and distortion coefficients were computed
+## 1. Calculating the camera matrix and distortion coefficients
 
-The code is in `calibrate()`, and it follows the same recipe as `09_01_calibration.py` from the course repo. For each of the 20 chessboard photos in `img/calibration*.jpg`, the inner corners are located with `cv.findChessboardCorners` and then refined to sub-pixel accuracy with `cv.cornerSubPix`. Each corner also gets a matching 3D point: its grid position on the board, measured in squares, with `z = 0` because the board is flat. All the 2D/3D pairs are passed to `cv.calibrateCamera`, and the result is saved to `img/calib.npz`.
+The calibration is done in `calibrate()`. It uses the 20 chessboard images from `img/calibration*.jpg`.
 
-One thing worth knowing: images 1, 4 and 5 are cropped, so the full 9x6 pattern doesn't fit in them. When 9x6 isn't found, the code falls back to smaller patterns (9x5, 6x5, 7x6), and that is what allows all 20 images to be used.
+For every image, the program first tries to find the inner chessboard corners with `cv.findChessboardCorners`. The corners are then made more precise with `cv.cornerSubPix`.
+
+For every detected corner there is also a corresponding 3D point. The chessboard is flat, so all these points have $z = 0$. The points from all images are then given to `cv.calibrateCamera()`. The calculated camera matrix and distortion coefficients are saved in `img/calib.npz`.
+
+The calibration code follows the same basic approach as `09_01_calibration.py` from the course repository.
+
+Some of the calibration images are cropped. Because of that, the complete $9 \times 6$ pattern cannot be found in images 1, 4 and 5. The program therefore also tries smaller patterns such as $9 \times 5$, $6 \times 5$ and $7 \times 6$. This makes it possible to use all 20 images.
 
 | Quantity | Value |
-|---|---|
-| RMS error | 0.996 px |
-| "Total error" (same formula as in `09_01`) | 0.124 |
-| fx, fy | 1161.3, 1158.5 px |
-| cx, cy | 666.7, 389.6 px |
-| [k1, k2, p1, p2, k3] | -0.258, 0.062, -0.0002, -0.0001, -0.148 |
+|---|---:|
+| RMS error | $0.996\text{ px}$ |
+| "Total error" (same formula as in `09_01`) | $0.124$ |
+| $f_x, f_y$ | $1161.3, 1158.5\text{ px}$ |
+| $c_x, c_y$ | $666.7, 389.6\text{ px}$ |
+| $[k_1, k_2, p_1, p_2, k_3]$ | $-0.258, 0.062, -0.0002, -0.0001, -0.148$ |
 
-Original on the left, undistorted on the right:
+Original image on the left and undiistorted image on the right:
 
 ![Undistorted](./examples/undistort_calibration.jpg)
 
-## Pipeline (single images)
+# Pipeline (single images)
 
-#### 1. Distortion-corrected image
+## 1. Removing distortion
 
-`undistort()` applies `cv.undistort` with the parameters stored in `calib.npz`. The effect is subtle on the road, but you can see it near the edges of the frame and around the car hood (original on the left, corrected on the right):
+`undistort()` uses `cv.undistort()` with the parameters saved in `calib.npz`.
+
+The difference is not very large in the middle of the image, but it can be noticed more around the edges and near the car hood.
 
 ![Road Transformed](./examples/undistort_road.jpg)
 
-#### 2. Binary image (color + gradient)
+## 2. Creating the binary image
 
-`threshold()` builds the mask from two sources and combines them with a logical OR:
+The function `threshold()` creates a binary image from color and gradient information.
 
-* **The S channel of the HLS color space** (170-255). Yellow and white paint both stand out here, and it holds up well when the lighting changes.
-* **A Sobel filter in the x direction on the L channel** (20-100). It reacts to near-vertical edges, which is exactly what lane lines look like from a driver's seat.
+Two main things are used:
 
-On top of that, any pixel with lightness L below 120 is thrown away. Shadows can have a high S value too, but a lane marking is never dark, so this simple rule removes most of the false hits from tree shadows.
+- **S channel from HLS:** pixels with S between $170$ and $255$ are selected. This helps with detecting the lane markings, especially the yellow and white ones.
+- **Sobel in the x direction on the L channel:** pixels with a value between $20$ and $100$ are selected. This detects edges that are mostly vertical, which is useful for lane lines.
+
+The two masks are combined with a logical OR.
+
+There is also an extra condition that removes pixels where the lightness is below $120$. This is mainly there to reduce false detections caused by dark shadows.
 
 ![Binary Example](./examples/binary.jpg)
 
-#### 3. Perspective transform
+## 3. Perspective transform
 
-`warp()` is written in the same style as `translate()` and `rotate()` in `00_02_transformations.py`, but it uses `getPerspectiveTransform` and `warpPerspective` instead of `warpAffine`. An affine transform can't stretch a trapezoid into a rectangle, so it isn't enough here. The source points were picked by hand on `straight_lines1.jpg`, and the destination points are chosen so the lanes end up vertical:
+The `warp()` function changes the road image to a bird's-eye view. This makes the lane lines easier to work with because they become closer to parallel and vertical.
+
+The transformation is done with `cv.getPerspectiveTransform()` and `cv.warpPerspective()`.
+
+The source points were selected manually using `straight_lines1.jpg`. The destination points were selected so that the lanes are approximately vertical in the new image.
 
 | Point | Source | Destination |
 |---|---|---|
-| top left | (595, 450) | (300, 0) |
-| top right | (690, 450) | (980, 0) |
-| bottom right | (1115, 720) | (980, 720) |
-| bottom left | (216, 720) | (300, 720) |
+| top left | $(595, 450)$ | $(300, 0)$ |
+| top right | $(690, 450)$ | $(980, 0)$ |
+| bottom right | $(1115, 720)$ | $(980, 720)$ |
+| bottom left | $(216, 720)$ | $(300, 720)$ |
 
-The quick sanity check is the straight-road image: after the warp, both lanes should be parallel and vertical, and they are (red trapezoid on the left, bird's-eye view on the right):
+A straight road image was used as a simple check. After the transformation, the two lane lines should look approximately parallel and vertical.
 
 ![Warp Example](./examples/perspective.jpg)
 
-#### 4. Lane pixels (Hough) and polynomial fit
+## 4. Finding the lanes and fitting the polynomial
 
-This part lives in `find_lane_points()` and `fit_lanes()`.
+This part is done by `find_lane_points()` and `fit_lanes()`.
 
-1. **Hough transform.** `cv.HoughLinesP` runs on the binary bird's-eye image. Before that, a few areas are blanked out because they only produce junk segments: the left 200 px (the jagged edge of the road), the right 100 px, and the bottom 60px (noise from the hood).
-2. **Filtering the segments.** Anything tilted more than about 35° from vertical is dropped. The rest is assigned to the left or right lane, depending on whether the segment's midpoint is left or right of the image center. Every segment is then turned into points about 2 px apart, so longer segments naturally count for more.
-3. **Throwing out noise.** For each lane, a small RANSAC step (2 random points, 300 tries, fixed seed so results are repeatable) looks for the straight line that has the most points within ±40 px. Points far from that line are treated as noise.
+### Hough transform vs. Sliding Window approach
 
-4. **Fitting the curve.** The model is `x = A·y² + B·y + C`. It is written as a function of `y` because the lanes run almost vertically in this view. In the bird's-eye view the two lanes are parallel, so they share `A` and `B` and differ only in `C`. The fit uses the points from both lanes at once (`np.linalg.lstsq`), and it is repeated three times, each time dropping points more than 25 px away from the current curve.
-5. **A safety net.** A lane is only trusted if its segments cover at least 5 of 9 horizontal bands of the image. If one lane fails this check (for example, a dashed line with long gaps), its `C` is taken from the other lane, shifted by one lane width (680 px).
+While traditional sliding-window or pixel-histogram methods are commonly used for lane tracking, using the Probabilistic Hough Transform (`cv.HoughLinesP`) offers key engineering advantages in this pipeline:
+- **Early angular filtering:** It allows filtering out line segments based on their slope right at the start, easily discarding horizontal and steep diagonal artifacts caused by road patches, vehicle shadows, or pavement seams.
+- **Global line structure over local noise:** Instead of relying on local pixel intensities that can get pulled off-track by dark spots or temporary lane disruptions, the Hough transform looks for geometric line agreement. This provides a clean, structured set of points that leads to a much more stable input for the subsequent polynomial fit.
 
-In the pictures below, red segments belong to the left lane, blue ones to the right lane, and the yellow line is the fitted curve.
+### Hough transform implementation
+
+First, `cv.HoughLinesP()` is used on the binary bird's-eye image.
+
+Some parts of the image are ignored because they usually contain unwanted lines. The first $200\text{ pixels}$ on the left, the last $100\text{ pixels}$ on the right and the bottom $60\text{ pixels}$ are removed from the Hough search.
+
+The detected segments are then filtered. Lines that are too horizontal are removed because lane lines should be mostly vertical in this perspective. The remaining segments are split into left and right depending on which side of the image center they are on.
+
+The segments are also converted into points approximately every $2\text{ pixels}$. This means that longer Hough segments contribute more points to the following fit.
+
+### Removing noisy points
+
+A small RANSAC step is then used for each lane. It randomly chooses two points and checks how many other points are close to the line defined by them. This is repeated $300$ times. Points that do not fit the dominant line are treated as noise.
+
+A fixed random seed is used so that the result is repeatable.
+
+### Polynomial fit
+
+The lane is represented with:
+
+$$x = A \cdot y^2 + B \cdot y + C$$
+
+Using $x$ as a function of $y$ makes sense here because the lane lines are almost vertical in the bird's-eye view.
+
+Both lanes are fitted together. The program assumes that the two lanes have approximately the same curvature, so they use the same $A$ and $B$ values. Their horizontal position is different, so they have different $C$ values.
+
+The fit is done with `np.linalg.lstsq()`. It is repeated a few times, removing points that are more than $25\text{ pixels}$ away from the current curve.
+
+There is also a check for how much of the image height is covered by detected lane segments. At least $5$ of $9$ horizontal sections have to contain enough points. If one lane is not detected well enough, its position is estimated from the other lane using the assumed lane width of $680\text{ pixels}$.
+
+In the images below, red lines are the left Hough segments, blue lines are the right segments and yellow lines are the fitted curves.
 
 ![Hough](./examples/hough_lines.jpg)
 
 ![Fit Visual](./examples/polynomial_fit.jpg)
 
-Why share one curve between both lanes? Fitting each lane separately gave very different radii for the same road, for example 14700 m and 261 m on a single image. Hough segments are short and only cover part of the image height, so a quadratic fitted to one of them extrapolates badly. Pooling all the points makes the result much more stable.
+### Why are both lanes fitted together?
 
-#### 5. Curvature and vehicle position
+I first tried fitting the two lanes separately. The problem was that the Hough segments are relatively short, so fitting a quadratic to only one side can give very different results depending on which part of the lane was detected.
 
-This is done in `measure()`.
+For example, on one image the two separately calculated radii were about $14700\text{ m}$ and $261\text{ m}$. Using the points from both lanes together gives a more stable curve because there are more points over a larger part of the image.
 
-* **Pixels to meters.** `YM_PER_PIX = 30/720` and `XM_PER_PIX = 3.7/680`. These are common assumptions (about 30 m of road in view, and a 3.7 m wide lane that is 680 px wide after the warp). They are not measured for this particular camera.
-* **Radius.** The curve is refitted in meters, and the radius is computed with `R = (1 + (2·A·y + B)²)^1.5 / |2·A|` at the bottom of the image, which is the point closest to the car. Since both lanes share `A` and `B`, they come out with the same radius.
-* **Position in the lane.** The camera is assumed to sit in the middle of the car, at `x = 640`. The offset is the distance between that point and the center of the lane at the bottom of the image. A negative value means the car is to the left of the center.
-* **A quick check.** The printed lane width should be close to 680 px.
+## 5. Curvature and vehicle position
+
+The calculations are done in `measure()`.
+
+### Converting pixels to meters
+
+Two approximate conversion values are used:
+
+- `YM_PER_PIX` = $30 / 720$
+- `XM_PER_PIX` = $3.7 / 680$
+
+This assumes that about $30\text{ meters}$ of road are visible in the image and that the lane is $3.7\text{ meters}$ wide. These are assumptions for this project and were not measured directly from the camera.
+
+### Radius
+
+The polynomial is converted from pixels to meters and the radius is calculated at the bottom of the image. The bottom is used because it represents the part of the road closest to the car.
+
+The formula used is:
+
+$$R = \frac{(1 + (2 \cdot A \cdot y + B)^2)^{1.5}}{|2 \cdot A|}$$
+
+Since both lanes use the same $A$ and $B$, they have the same calculated radius.
+
+### Position of the car
+
+The camera is assumed to be in the middle of the vehicle, so the center of the car is taken as $x = 640$.
+
+The center of the lane is calculated from the left and right fitted lines at the bottom of the image. The difference between the car center and lane center gives the offset.
+
+A negative value means that the car is to the left of the lane center.
+
+The lane width printed by the program should ideally be close to $680\text{ pixels}$.
 
 | Image | Radius [m] | Offset [m] | Lane width [px] | Radius from an earlier sliding-window experiment [m] |
-|---|---|---|---|---|
+|---|---:|---:|---:|---:|
 | straight_lines1 | 1879 | 0.11 | 652 | 8015 |
 | straight_lines2 | 3310 | 0.05 | 679 | 7647 |
 | test1 | 381 | -0.19 | 704 | 425 |
@@ -141,24 +243,30 @@ This is done in `measure()`.
 | test5 | 453 | 0.04 | 738 | 464 |
 | test6 | 22359 | -0.03 | 660 | 837 |
 
-A few honest caveats:
+### Some limitations
 
-* On straight roads the radius is in the thousands of meters and depends heavily on small amounts of noise, so those numbers are only rough.
-* The Hough version and the earlier sliding-window experiment disagree on some images (`test4`, `test6`). That tells us a curvature eestimate from a single image can easily be off by tens of percent, and there is no ground truth here to say which one is closer.
-* The measured lane width is up to about 8% away from 680 px, so the source/destination points and the 3.7 m assumption are only approximate.
+There are a few things that should be kept in mind when looking at these results:
 
-#### 6. Result drawn back onto the road
+- On straight roads the radius is very large, so even small changes in the detected points can change the result a lot.
+- The Hough version and the earlier sliding-window experiment give different results on some images, especially `test4` and `test6`. There is no ground truth in this project, so it is difficult to say which result is closer to the real value.
+- The detected lane width is sometimes several percent away from $680\text{ pixels}$. This means that the perspective points and the assumed $3.7\text{ m}$ lane width are only approximate.
 
-TODO
-
-## Pipeline (video)
+## 6. Drawing the result back onto the road
 
 TODO
 
-## Discussion
+# Pipeline (video)
 
 TODO
 
-## Tools
+# Discussion
 
-Parts of this project (the code and the drafting of this README) were developed with the help of an AI assistant.
+TODO
+
+# Tools
+
+## Notes from the author
+
+A few tecchnical notes regarding display and processing challenges during development:
+- During GUI testing, `cv.imshow` initially caused display issues depending on system rendering backends. Alternative windowing functions were tested as a fallback, though the original OpenCV GUI functions were ultimately restored once environment display flags were stabilized.
+- For video processing, an experimental implementation was creatd; however, frame-to-frame smoothing and temporal tracking are still undergoing refinement to achieve robust performance across consecutive frames. 
